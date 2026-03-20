@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
 import { LayoutDashboard, Package, Layers, ShoppingCart, Factory, BarChart3, MessageSquare, Trash2, Wallet, FileText } from 'lucide-react';
 import { useState } from 'react';
 import { api } from './api';
+import PasswordGate from './components/PasswordGate';
 import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
 import Materials from './pages/Materials';
@@ -41,6 +42,7 @@ export default function App() {
   }
 
   return (
+    <PasswordGate>
     <BrowserRouter>
       <div className="flex h-screen">
         {/* Sidebar */}
@@ -96,5 +98,6 @@ export default function App() {
         </main>
       </div>
     </BrowserRouter>
+    </PasswordGate>
   );
 }
