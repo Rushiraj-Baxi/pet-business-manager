@@ -51,18 +51,18 @@ Run these commands from the project root (`soft/`):
 
 ```powershell
 # 1. Create zip with forward-slash paths (required for Linux)
-Add-Type -AssemblyName System.IO.Compression.FileSystem
+#    NOTE: Do NOT use Compress-Archive or ZipFile.CreateFromDirectory — both
+#    create backslash paths on Windows that break Linux rsync.
+Add-Type -AssemblyName System.IO.Compression
 
-$src = (Resolve-Path "backend").Path
-$zip = (Resolve-Path ".").Path + "\backend_deploy.zip"
-if (Test-Path $zip) { Remove-Item $zip }
+$srcDir = (Resolve-Path "backend").Path
+$zip = Join-Path $PWD "backend_deploy.zip"
 
-[System.IO.Compression.ZipFile]::CreateFromDirectory($src, $zip)
-
-# Remove __pycache__ entries from the zip
-$archive = [System.IO.Compression.ZipFile]::Open($zip, 'Update')
-$toDelete = $archive.Entries | Where-Object { $_.FullName -match '__pycache__' }
-$toDelete | ForEach-Object { $_.Delete() }
+$archive = [System.IO.Compression.ZipFile]::Open($zip, 'Create')
+Get-ChildItem $srcDir -Recurse -File | Where-Object { $_.FullName -notmatch '__pycache__' } | ForEach-Object {
+    $entry = $_.FullName.Substring($srcDir.Length + 1).Replace('\', '/')
+    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $_.FullName, $entry) | Out-Null
+}
 $archive.Dispose()
 
 Write-Host "Created: $((Get-Item $zip).Length) bytes"
