@@ -3,6 +3,13 @@ set -e
 echo "=== startup.sh begin ==="
 
 mkdir -p /home/data
+
+# Install poppler-utils for PDF-to-image conversion
+if ! command -v pdftoppm &> /dev/null; then
+    echo "Installing poppler-utils..."
+    apt-get update -qq && apt-get install -y -qq poppler-utils 2>/dev/null || true
+fi
+
 cd /home/site/wwwroot
 
 # Install dependencies into a persistent venv (survives restarts)

@@ -63,17 +63,15 @@ def _extract_text(filepath: str) -> str:
 
 def _parse_scanned_pdf(filepath: str, invoice_type: str) -> dict:
     """Convert scanned PDF pages to images and parse with AI vision."""
-    import fitz  # PyMuPDF
+    from pdf2image import convert_from_path
     import tempfile
 
-    doc = fitz.open(filepath)
+    images = convert_from_path(filepath, dpi=200, first_page=1, last_page=5)
     all_parsed = None
 
-    for page_num in range(min(len(doc), 5)):  # Limit to 5 pages
-        page = doc[page_num]
-        pix = page.get_pixmap(dpi=200)
+    for page_num, img in enumerate(images):
         img_path = os.path.join(tempfile.gettempdir(), f"scan_page_{page_num}.png")
-        pix.save(img_path)
+        img.save(img_path, "PNG")
 
         try:
             parsed = parse_invoice_image(img_path, invoice_type)
@@ -89,8 +87,6 @@ def _parse_scanned_pdf(filepath: str, invoice_type: str) -> dict:
                 os.remove(img_path)
             except OSError:
                 pass
-
-    doc.close()
 
     if all_parsed is None:
         raise ValueError("Could not read scanned PDF — AI vision failed on all pages")
