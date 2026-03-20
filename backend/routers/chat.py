@@ -16,8 +16,29 @@ class ChatRequest(BaseModel):
     message: str
 
 
+def _normalize_name(name: str) -> str:
+    """Normalize a product/material name for fuzzy matching."""
+    s = name.strip().lower()
+    s = re.sub(r'\s+', ' ', s)
+    s = re.sub(r'(\d)\s*(gms|gm|grams|gram)\b', r'\1g', s)
+    s = re.sub(r'(\d)\s+([gG])\b', r'\1g', s)
+    s = re.sub(r'(\d)\s*(mls|ml)\b', r'\1ml', s)
+    s = re.sub(r'(\d)\s+(ml)\b', r'\1ml', s)
+    s = re.sub(r'(\d)\s*(kgs|kg)\b', r'\1kg', s)
+    s = re.sub(r'(\d)\s+(kg)\b', r'\1kg', s)
+    return s.strip()
+
+
 def _find_product(db, name):
-    return db.query(Product).filter(func.lower(Product.name) == name.strip().lower()).first()
+    """Find product by exact match or normalized fuzzy match."""
+    p = db.query(Product).filter(func.lower(Product.name) == name.strip().lower()).first()
+    if p:
+        return p
+    norm = _normalize_name(name)
+    for prod in db.query(Product).all():
+        if _normalize_name(prod.name) == norm:
+            return prod
+    return None
 
 
 def _find_material(db, name):
@@ -404,6 +425,149 @@ def _execute_actions(actions: list[dict], db: Session) -> list[dict]:
                 db.delete(machine)
                 db.flush()
                 results.append({"ok": True, "action": atype, "detail": f"Deleted machine '{name}'", "affected": ["machines", "reports"]})
+
+            # ── MERGE PRODUCTS (consolidate duplicates) ─────
+            elif atype == "merge_products":
+                target_name = action.get("target_name", "").strip()
+                source_names = action.get("source_names", [])
+                if not target_name or not source_names:
+                    results.append({"ok": False, "action": atype, "detail": "Need target_name and source_names"})
+                    continue
+                # Find or create the target product
+                target = _find_product(db, target_name)
+                merged_count = 0
+                for src_name in source_names:
+                    src = db.query(Product).filter(func.lower(Product.name) == src_name.strip().lower()).first()
+                    if not src:
+                        # Try normalized match
+                        norm = _normalize_name(src_name)
+                        for p in db.query(Product).all():
+                            if _normalize_name(p.name) == norm and p.id != (target.id if target else -1):
+                                src = p
+                                break
+                    if not src:
+                        continue
+                    if target and src.id == target.id:
+                        continue
+                    if not target:
+                        # Use the first source as target and rename it
+                        src.name = target_name
+                        target = src
+                        db.flush()
+                        merged_count += 1
+                        continue
+                    # Reassign all sales from source to target
+                    db.query(Sale).filter(Sale.product_id == src.id).update(
+                        {Sale.product_id: target.id}, synchronize_session='fetch'
+                    )
+                    # Reassign all productions from source to target
+                    db.query(Production).filter(Production.product_id == src.id).update(
+                        {Production.product_id: target.id}, synchronize_session='fetch'
+                    )
+                    # Sum stock
+                    target.stock += src.stock
+                    # Delete the duplicate
+                    db.delete(src)
+                    db.flush()
+                    merged_count += 1
+                if target and target.name != target_name:
+                    target.name = target_name
+                    db.flush()
+                results.append({"ok": True, "action": atype, "detail": f"Merged {merged_count} product(s) into '{target_name}'", "affected": ["products", "sales", "dashboard", "analytics"]})
+
+            # ── UPDATE SALE ─────────────────────────────────
+            elif atype == "update_sale":
+                sale = db.query(Sale).get(int(action["sale_id"]))
+                if not sale:
+                    results.append({"ok": False, "action": atype, "detail": f"Sale #{action['sale_id']} not found"})
+                    continue
+                if "product_name" in action:
+                    prod = _find_product(db, action["product_name"])
+                    if prod:
+                        old_prod = db.query(Product).get(sale.product_id)
+                        if old_prod:
+                            old_prod.stock += sale.quantity
+                        sale.product_id = prod.id
+                        prod.stock = max(0, prod.stock - sale.quantity)
+                if "quantity" in action:
+                    old_qty = sale.quantity
+                    new_qty = int(action["quantity"])
+                    prod = db.query(Product).get(sale.product_id)
+                    if prod:
+                        prod.stock += old_qty - new_qty
+                    sale.quantity = new_qty
+                    sale.total_price = new_qty * sale.price_per_unit
+                if "price_per_unit" in action:
+                    sale.price_per_unit = float(action["price_per_unit"])
+                    sale.total_price = sale.quantity * sale.price_per_unit
+                if "customer" in action:
+                    sale.customer = action["customer"]
+                if "invoice_no" in action:
+                    sale.invoice_no = action["invoice_no"]
+                if "date" in action:
+                    sale.date = datetime.fromisoformat(action["date"])
+                if "taxable_amount" in action:
+                    sale.taxable_amount = float(action["taxable_amount"])
+                if "igst" in action:
+                    sale.igst = float(action["igst"])
+                if "sgst" in action:
+                    sale.sgst = float(action["sgst"])
+                if "cgst" in action:
+                    sale.cgst = float(action["cgst"])
+                db.flush()
+                results.append({"ok": True, "action": atype, "detail": f"Updated sale #{action['sale_id']}", "affected": ["sales", "dashboard", "analytics"]})
+
+            # ── UPDATE PURCHASE ─────────────────────────────
+            elif atype == "update_purchase":
+                pur = db.query(Purchase).get(int(action["purchase_id"]))
+                if not pur:
+                    results.append({"ok": False, "action": atype, "detail": f"Purchase #{action['purchase_id']} not found"})
+                    continue
+                if "quantity" in action:
+                    mat = db.query(RawMaterial).get(pur.raw_material_id)
+                    if mat:
+                        mat.current_stock += float(action["quantity"]) - pur.quantity
+                    pur.quantity = float(action["quantity"])
+                    pur.total_price = pur.quantity * pur.price_per_unit
+                if "price_per_unit" in action:
+                    pur.price_per_unit = float(action["price_per_unit"])
+                    pur.total_price = pur.quantity * pur.price_per_unit
+                if "supplier" in action:
+                    pur.supplier = action["supplier"]
+                db.flush()
+                results.append({"ok": True, "action": atype, "detail": f"Updated purchase #{action['purchase_id']}", "affected": ["materials", "dashboard"]})
+
+            # ── UPDATE EXPENSE ──────────────────────────────
+            elif atype == "update_expense":
+                exp = db.query(Expense).get(int(action["expense_id"]))
+                if not exp:
+                    results.append({"ok": False, "action": atype, "detail": f"Expense #{action['expense_id']} not found"})
+                    continue
+                if "category" in action:
+                    exp.category = action["category"]
+                if "amount" in action:
+                    exp.amount = float(action["amount"])
+                if "description" in action:
+                    exp.description = action["description"]
+                db.flush()
+                results.append({"ok": True, "action": atype, "detail": f"Updated expense #{action['expense_id']}", "affected": ["analytics", "dashboard"]})
+
+            # ── UPDATE PRODUCTION ───────────────────────────
+            elif atype == "update_production":
+                prod_rec = db.query(Production).get(int(action["production_id"]))
+                if not prod_rec:
+                    results.append({"ok": False, "action": atype, "detail": f"Production #{action['production_id']} not found"})
+                    continue
+                if "quantity_produced" in action:
+                    prod_rec.quantity_produced = int(action["quantity_produced"])
+                if "raw_material_used" in action:
+                    prod_rec.raw_material_used = float(action["raw_material_used"])
+                if "wastage" in action:
+                    prod_rec.wastage = float(action["wastage"])
+                if "hours_run" in action:
+                    prod_rec.hours_run = float(action["hours_run"])
+                db.flush()
+                results.append({"ok": True, "action": atype, "detail": f"Updated production #{action['production_id']}", "affected": ["production", "dashboard"]})
 
             else:
                 results.append({"ok": False, "action": atype, "detail": f"Unknown action type '{atype}'"})

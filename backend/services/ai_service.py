@@ -147,6 +147,29 @@ Wrap actions between <<<ACTIONS>>> and <<<END_ACTIONS>>> markers. JSON must be a
 25. delete_machine
     {"type": "delete_machine", "machine_name": "Injection Molder 1"}
 
+── MERGE / CONSOLIDATE PRODUCTS ──
+26. merge_products (consolidate duplicate product names into one)
+    {"type": "merge_products", "target_name": "PET Preform 26gm", "source_names": ["Pet preform 26gm", "Pet Preform 26g", "PET Preform 26 g", "pet preform 26 g"]}
+    This reassigns ALL sales and production records from the source products to the target product,
+    sums their stock, and deletes the duplicates. Use this when the user says "rename all X to Y",
+    "consolidate", "merge duplicates", etc. Look at the products list in context to find variations
+    of the same product name (different casing, spacing, unit abbreviations like 26g vs 26gm).
+
+── UPDATE / EDIT EXISTING RECORDS ──
+27. update_sale (edit any field on an existing sale)
+    {"type": "update_sale", "sale_id": 5, "quantity": 600, "price_per_unit": 2.5, "customer": "New Corp", "date": "2026-03-15", "taxable_amount": 1500, "igst": 0, "sgst": 135, "cgst": 135, "invoice_no": "INV-002"}
+    Only include fields you want to change. Use sale_id from recent_sales in context.
+
+28. update_purchase (edit any field on an existing purchase)
+    {"type": "update_purchase", "purchase_id": 3, "quantity": 2000, "price_per_unit": 90, "supplier": "New Supplier"}
+    Only include fields you want to change.
+
+29. update_expense (edit any field on an existing expense)
+    {"type": "update_expense", "expense_id": 1, "category": "Electricity", "amount": 20000, "description": "Updated bill"}
+
+30. update_production (edit any field on an existing production record)
+    {"type": "update_production", "production_id": 2, "quantity_produced": 1500, "raw_material_used": 30.0, "wastage": 0.8, "hours_run": 10}
+
 ── CHARTS (Dashboard) ──
 You can CREATE, EDIT, or DELETE charts on the dashboard!
 
@@ -209,6 +232,13 @@ You can CREATE, EDIT, or DELETE charts on the dashboard!
 - For pie charts, use data_key for the value field and name_key for labels
 - You can do detailed analytics: P&L, FY comparison, production planning, customer analysis, GST reports, rate trends, revenue projections
 - For production planning, analyze stock vs demand and suggest what to produce next
+- PRODUCT NAME CONSOLIDATION: When the user asks to rename, consolidate, or merge products, use merge_products.
+  Look at the products list to find name variations (e.g., "PET Preform 26gm" vs "Pet preform 26g") and merge them.
+  Common variations: different casing (PET vs Pet vs pet), unit abbreviations (g vs gm vs gms), extra spaces (26 g vs 26g).
+- YOU CAN DO ANY DATA MANIPULATION: add, update, delete, merge, rename, bulk edit across all entities
+  (products, sales, materials, purchases, production, expenses, machines, charts, business entries).
+  When the user asks you to do something, DO IT — don't just describe what to do.
+  If the user asks to modify sales, update purchases, merge products, bulk rename, etc. — execute the actions.
 
 === EXAMPLE RESPONSES ===
 
@@ -240,6 +270,22 @@ Done! Removed the old chart and created a profit margins bar chart.
 
 <<<ACTIONS>>>
 [{"type":"delete_chart","chart_title":"Revenue by Product"},{"type":"add_chart","title":"Profit Margins by Product","chart_type":"bar","data_source":"profit_by_product","config":{"data_key":"profit","second_data_key":"cost","color":"#10b981","second_color":"#ef4444","show_legend":true},"page":"dashboard"}]
+<<<END_ACTIONS>>>
+
+User: "Rename all PET preform 26g to PET Preform 26gm"
+
+Done! I've consolidated all variations of this product into "PET Preform 26gm". All sales and production records have been reassigned.
+
+<<<ACTIONS>>>
+[{"type":"merge_products","target_name":"PET Preform 26gm","source_names":["PET preform 26g","Pet preform 26gm","Pet Preform 26g","PET Preform 26 g","pet preform 26 g"]}]
+<<<END_ACTIONS>>>
+
+User: "Update sale #5 to change quantity to 600 and customer to XYZ Corp"
+
+Done! Updated sale #5.
+
+<<<ACTIONS>>>
+[{"type":"update_sale","sale_id":5,"quantity":600,"customer":"XYZ Corp"}]
 <<<END_ACTIONS>>>"""
 
 

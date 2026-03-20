@@ -1,8 +1,10 @@
 import os
 import math
+import re
 import uuid
 from fastapi import APIRouter, Depends, UploadFile, File, Form
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from datetime import datetime, timezone
 from typing import List
 
@@ -12,6 +14,51 @@ from services.file_processor import process_pdf, UPLOAD_DIR
 from services.ai_service import parse_invoice_text, parse_invoice_image
 
 router = APIRouter(prefix="/api/invoices", tags=["invoices"])
+
+
+def _normalize_name(name: str) -> str:
+    """Normalize a product/material name for fuzzy matching.
+    e.g. 'PET Preform 26gm', 'Pet preform 26 g', 'pet preform 26g' all → 'pet preform 26g'
+    """
+    s = name.strip().lower()
+    s = re.sub(r'\s+', ' ', s)  # collapse whitespace
+    # normalize weight units: gm, gms, gram, grams → g
+    s = re.sub(r'(\d)\s*(gms|gm|grams|gram)\b', r'\1g', s)
+    # normalize: 26 g → 26g (number + space + single-letter unit)
+    s = re.sub(r'(\d)\s+([gG])\b', r'\1g', s)
+    # normalize ml units
+    s = re.sub(r'(\d)\s*(mls|ml)\b', r'\1ml', s)
+    s = re.sub(r'(\d)\s+(ml)\b', r'\1ml', s)
+    # normalize kg
+    s = re.sub(r'(\d)\s*(kgs|kg)\b', r'\1kg', s)
+    s = re.sub(r'(\d)\s+(kg)\b', r'\1kg', s)
+    return s.strip()
+
+
+def _find_product_fuzzy(db: Session, name: str):
+    """Find an existing product by fuzzy name matching."""
+    # 1. Exact match (case-insensitive)
+    product = db.query(Product).filter(func.lower(Product.name) == name.strip().lower()).first()
+    if product:
+        return product
+    # 2. Normalized match — compare against all products
+    norm = _normalize_name(name)
+    for p in db.query(Product).all():
+        if _normalize_name(p.name) == norm:
+            return p
+    return None
+
+
+def _find_material_fuzzy(db: Session, name: str):
+    """Find an existing material by fuzzy name matching."""
+    material = db.query(RawMaterial).filter(func.lower(RawMaterial.name) == name.strip().lower()).first()
+    if material:
+        return material
+    norm = _normalize_name(name)
+    for m in db.query(RawMaterial).all():
+        if _normalize_name(m.name) == norm:
+            return m
+    return None
 
 
 def _safe_float(val, default=0.0) -> float:
@@ -123,8 +170,8 @@ def _process_sales_invoice(parsed: dict, db: Session) -> dict:
             name_lower = name.lower()
             ptype = "cap" if any(w in name_lower for w in ["cap", "lid", "cover"]) else "preform"
 
-            # Find or create product
-            product = db.query(Product).filter(Product.name == name).first()
+            # Find or create product (fuzzy match to prevent duplicates)
+            product = _find_product_fuzzy(db, name)
             if not product:
                 product = Product(
                     name=name, type=ptype, variant=name,
@@ -180,8 +227,8 @@ def _process_purchase_invoice(parsed: dict, db: Session) -> dict:
             total = total or (taxable + gst_amt) or (rate * qty)
             rate = rate or (total / qty if qty > 0 else 0)
 
-            # Find or create raw material
-            material = db.query(RawMaterial).filter(RawMaterial.name == name).first()
+            # Find or create raw material (fuzzy match to prevent duplicates)
+            material = _find_material_fuzzy(db, name)
             if not material:
                 material = RawMaterial(
                     name=name, unit=unit,
