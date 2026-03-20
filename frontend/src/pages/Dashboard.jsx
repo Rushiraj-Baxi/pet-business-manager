@@ -4,7 +4,7 @@ import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area,
 } from 'recharts';
-import { TrendingUp, TrendingDown, Package, AlertTriangle, IndianRupee, Percent, Upload, CheckCircle, XCircle, Trash2, Receipt, FolderOpen, FileText, X } from 'lucide-react';
+import { TrendingUp, TrendingDown, Package, AlertTriangle, IndianRupee, Percent, Upload, CheckCircle, XCircle, Trash2, Receipt, FolderOpen, FileText, X, RefreshCw } from 'lucide-react';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
@@ -172,6 +172,8 @@ export default function Dashboard() {
   const [invoiceProgress, setInvoiceProgress] = useState('');
   const [invoiceCurrent, setInvoiceCurrent] = useState(0);
   const [invoiceResult, setInvoiceResult] = useState(null);
+  const [failedFiles, setFailedFiles] = useState([]);
+  const [retryingFailed, setRetryingFailed] = useState(false);
 
   useEffect(() => {
     load();
@@ -244,11 +246,46 @@ export default function Dashboard() {
     e.target.value = '';
   }
 
+  async function _uploadBatch(files, totalLabel, allResults) {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      setInvoiceCurrent(prev => prev + 1);
+      setInvoiceProgress(`AI is reading "${file.name}" (${totalLabel})...`);
+
+      try {
+        const result = await api.uploadInvoices([file], invoiceType);
+        allResults.processed += result.processed || 0;
+        allResults.total_imported += result.total_imported || 0;
+        allResults.total_skipped += result.total_skipped || 0;
+        const fileResults = result.file_results || [];
+        for (const fr of fileResults) {
+          fr._file = file; // keep ref for retries
+          allResults.file_results.push(fr);
+        }
+        if (fileResults.some(fr => fr.status === 'failed')) {
+          allResults.failed += 1;
+        }
+      } catch (err) {
+        allResults.failed += 1;
+        allResults.file_results.push({
+          filename: file.name,
+          status: 'failed',
+          imported: 0,
+          errors: [err.message],
+          _file: file,
+        });
+      }
+
+      setInvoiceResult({ ...allResults });
+    }
+  }
+
   async function handleInvoiceUpload() {
     if (invoiceFiles.length === 0) return;
     setInvoiceUploading(true);
     setInvoiceCurrent(0);
     setInvoiceResult(null);
+    setFailedFiles([]);
 
     const totalFiles = invoiceFiles.length;
     const allResults = {
@@ -260,35 +297,69 @@ export default function Dashboard() {
       file_results: [],
     };
 
-    for (let i = 0; i < totalFiles; i++) {
-      const file = invoiceFiles[i];
-      setInvoiceCurrent(i + 1);
-      setInvoiceProgress(`AI is reading "${file.name}" (${i + 1}/${totalFiles})...`);
+    // Initial pass
+    await _uploadBatch(invoiceFiles, `pass 1 of ${totalFiles}`, allResults);
 
-      try {
-        const result = await api.uploadInvoices([file], invoiceType);
-        allResults.processed += result.processed || 0;
-        allResults.failed += result.failed || 0;
-        allResults.total_imported += result.total_imported || 0;
-        allResults.total_skipped += result.total_skipped || 0;
-        allResults.file_results.push(...(result.file_results || []));
-      } catch (err) {
-        allResults.failed += 1;
-        allResults.file_results.push({
-          filename: file.name,
-          status: 'failed',
-          imported: 0,
-          errors: [err.message],
-        });
-      }
+    // Auto-retry failed ones up to 3 times
+    for (let attempt = 2; attempt <= 4; attempt++) {
+      const failedFrs = allResults.file_results.filter(fr => fr.status === 'failed' && fr._file);
+      if (failedFrs.length === 0) break;
 
-      // Update results live so user can see progress
-      setInvoiceResult({ ...allResults });
+      setInvoiceProgress(`Retrying ${failedFrs.length} failed invoice(s) — attempt ${attempt - 1}/3...`);
+
+      // Remove old failed entries before retry
+      const failedFileSet = new Set(failedFrs.map(fr => fr._file));
+      allResults.file_results = allResults.file_results.filter(fr => !failedFileSet.has(fr._file));
+      allResults.failed = allResults.file_results.filter(fr => fr.status === 'failed').length;
+      allResults.processed = allResults.file_results.filter(fr => fr.status !== 'failed').length;
+
+      await _uploadBatch([...failedFileSet], `retry ${attempt - 1}/3`, allResults);
     }
 
+    // Sort: failed first, then success
+    allResults.file_results.sort((a, b) => {
+      if (a.status === 'failed' && b.status !== 'failed') return -1;
+      if (a.status !== 'failed' && b.status === 'failed') return 1;
+      return 0;
+    });
+
+    // Track still-failed files for manual retry
+    const stillFailed = allResults.file_results.filter(fr => fr.status === 'failed' && fr._file);
+    setFailedFiles(stillFailed.map(fr => fr._file));
+
+    setInvoiceResult({ ...allResults });
     setInvoiceProgress('');
     setInvoiceUploading(false);
     if (allResults.total_imported > 0) {
+      await load();
+    }
+  }
+
+  async function handleRetryFailed() {
+    if (failedFiles.length === 0) return;
+    setRetryingFailed(true);
+    setInvoiceCurrent(0);
+
+    const prevResult = { ...invoiceResult };
+    // Remove old failed entries for these files
+    const retrySet = new Set(failedFiles);
+    prevResult.file_results = prevResult.file_results.filter(fr => !retrySet.has(fr._file));
+    prevResult.failed = prevResult.file_results.filter(fr => fr.status === 'failed').length;
+
+    await _uploadBatch(failedFiles, `retry ${failedFiles.length} file(s)`, prevResult);
+
+    prevResult.file_results.sort((a, b) => {
+      if (a.status === 'failed' && b.status !== 'failed') return -1;
+      if (a.status !== 'failed' && b.status === 'failed') return 1;
+      return 0;
+    });
+
+    const stillFailed = prevResult.file_results.filter(fr => fr.status === 'failed' && fr._file);
+    setFailedFiles(stillFailed.map(fr => fr._file));
+    setInvoiceResult({ ...prevResult });
+    setInvoiceProgress('');
+    setRetryingFailed(false);
+    if (prevResult.total_imported > 0) {
       await load();
     }
   }
@@ -688,17 +759,27 @@ export default function Dashboard() {
                 </div>
               )}
 
+              {/* Retry Failed Button */}
+              {failedFiles.length > 0 && !invoiceUploading && !retryingFailed && (
+                <button
+                  onClick={handleRetryFailed}
+                  className="w-full py-3 rounded-xl font-semibold text-white text-sm bg-red-600 hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  <RefreshCw size={16} /> Retry {failedFiles.length} Failed Invoice(s)
+                </button>
+              )}
+
               {/* Upload Button */}
               <button
                 onClick={handleInvoiceUpload}
-                disabled={invoiceFiles.length === 0 || invoiceUploading}
+                disabled={invoiceFiles.length === 0 || invoiceUploading || retryingFailed}
                 className={`w-full py-3 rounded-xl font-semibold text-white text-sm transition-colors ${
                   invoiceType === 'sales'
                     ? 'bg-green-600 hover:bg-green-700 disabled:bg-green-300'
                     : 'bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300'
                 }`}
               >
-                {invoiceUploading
+                {invoiceUploading || retryingFailed
                   ? 'AI is reading invoices...'
                   : `Upload & Import ${invoiceFiles.length || ''} ${invoiceType === 'sales' ? 'Sales' : 'Purchase'} Invoice(s)`
                 }
