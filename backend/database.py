@@ -3,7 +3,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "..", "data")
+
+# On Azure App Service, use /home/data/ for persistence across redeploys
+if os.environ.get("WEBSITE_SITE_NAME"):
+    DATA_DIR = "/home/data"
+else:
+    DATA_DIR = os.path.join(BASE_DIR, "..", "data")
+
 os.makedirs(DATA_DIR, exist_ok=True)
 
 DATABASE_URL = f"sqlite:///{os.path.join(DATA_DIR, 'business.db')}"

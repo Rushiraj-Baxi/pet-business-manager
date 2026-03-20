@@ -1,7 +1,12 @@
 import sqlite3
 import os
 
-db_path = os.path.join(os.path.dirname(__file__), "..", "data", "business.db")
+# On Azure, use /home/data/; locally, use ../data/
+if os.environ.get("WEBSITE_SITE_NAME"):
+    db_path = "/home/data/business.db"
+else:
+    db_path = os.path.join(os.path.dirname(__file__), "..", "data", "business.db")
+
 conn = sqlite3.connect(db_path)
 c = conn.cursor()
 
