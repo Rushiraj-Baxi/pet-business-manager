@@ -61,6 +61,42 @@ def _extract_text(filepath: str) -> str:
     return ""  # Images will be handled directly by AI vision
 
 
+def _parse_scanned_pdf(filepath: str, invoice_type: str) -> dict:
+    """Convert scanned PDF pages to images and parse with AI vision."""
+    import fitz  # PyMuPDF
+    import tempfile
+
+    doc = fitz.open(filepath)
+    all_parsed = None
+
+    for page_num in range(min(len(doc), 5)):  # Limit to 5 pages
+        page = doc[page_num]
+        pix = page.get_pixmap(dpi=200)
+        img_path = os.path.join(tempfile.gettempdir(), f"scan_page_{page_num}.png")
+        pix.save(img_path)
+
+        try:
+            parsed = parse_invoice_image(img_path, invoice_type)
+            if all_parsed is None:
+                all_parsed = parsed
+            else:
+                # Merge items from subsequent pages
+                all_parsed.setdefault("items", []).extend(parsed.get("items", []))
+        except Exception:
+            continue
+        finally:
+            try:
+                os.remove(img_path)
+            except OSError:
+                pass
+
+    doc.close()
+
+    if all_parsed is None:
+        raise ValueError("Could not read scanned PDF — AI vision failed on all pages")
+    return all_parsed
+
+
 def _process_sales_invoice(parsed: dict, db: Session) -> dict:
     """Create sales records from parsed invoice data."""
     result = {"imported": 0, "skipped": 0, "details": [], "errors": []}
@@ -232,13 +268,11 @@ async def upload_invoices(
             else:
                 # Extract text from PDF, then parse with AI
                 text = _extract_text(filepath)
-                if not text or len(text.strip()) < 20:
-                    file_result["status"] = "failed"
-                    file_result["errors"].append("Could not extract readable text from PDF")
-                    total_results["failed"] += 1
-                    total_results["file_results"].append(file_result)
-                    continue
-                parsed = parse_invoice_text(text, invoice_type)
+                if text and len(text.strip()) >= 20:
+                    parsed = parse_invoice_text(text, invoice_type)
+                else:
+                    # Scanned PDF — convert pages to images and use AI vision
+                    parsed = _parse_scanned_pdf(filepath, invoice_type)
 
             # Process based on type
             if invoice_type == "sales":

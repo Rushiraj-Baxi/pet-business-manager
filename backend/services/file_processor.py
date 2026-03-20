@@ -35,7 +35,7 @@ def process_excel(filepath: str) -> dict:
 
 
 def process_pdf(filepath: str) -> dict:
-    """Extract text and tables from PDF."""
+    """Extract text and tables from PDF. Falls back to OCR for scanned PDFs."""
     text_pages = []
     tables = []
     with pdfplumber.open(filepath) as pdf:
@@ -47,12 +47,67 @@ def process_pdf(filepath: str) -> dict:
             for t in found_tables:
                 if t:
                     tables.append({"page": i + 1, "data": t})
+
+    # If pdfplumber found no text, try OCR via PyMuPDF + AI vision
+    if not text_pages and not tables:
+        try:
+            text_pages = _ocr_pdf_pages(filepath)
+        except Exception:
+            pass
+
     return {
         "type": "pdf",
         "pages": len(text_pages),
         "text": text_pages,
         "tables": tables,
     }
+
+
+def _ocr_pdf_pages(filepath: str) -> list:
+    """Convert scanned PDF pages to images and extract text via AI vision."""
+    import fitz  # PyMuPDF
+    import tempfile
+    import base64
+    import mimetypes
+    from services.ai_service import _get_client, _get_deployment
+
+    doc = fitz.open(filepath)
+    text_pages = []
+
+    for page_num in range(min(len(doc), 10)):
+        page = doc[page_num]
+        pix = page.get_pixmap(dpi=200)
+        img_path = os.path.join(tempfile.gettempdir(), f"ocr_page_{page_num}.png")
+        pix.save(img_path)
+
+        try:
+            with open(img_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+
+            response = _get_client().chat.completions.create(
+                model=_get_deployment(),
+                messages=[
+                    {"role": "system", "content": "You are a document reader. Extract ALL text visible in this image. Return the raw text exactly as shown, preserving layout where possible. If it's an invoice or business document, include all numbers, names, dates, and line items."},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": "Read and extract all text from this image:"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}", "detail": "high"}},
+                    ]},
+                ],
+                max_completion_tokens=2000,
+            )
+            text = response.choices[0].message.content.strip()
+            if text:
+                text_pages.append({"page": page_num + 1, "text": text})
+        except Exception:
+            continue
+        finally:
+            try:
+                os.remove(img_path)
+            except OSError:
+                pass
+
+    doc.close()
+    return text_pages
 
 
 def process_image(filepath: str) -> dict:

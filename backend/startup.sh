@@ -15,6 +15,8 @@ if [ ! -f "$VENV_DIR/bin/gunicorn" ]; then
 else
     echo "Using existing venv..."
     source "$VENV_DIR/bin/activate"
+    # Ensure any new packages in requirements.txt get installed
+    pip install --no-cache-dir -r requirements.txt 2>/dev/null || true
 fi
 
 echo "Running migrations..."
