@@ -247,7 +247,7 @@ export default function Dashboard() {
   }
 
   async function _uploadBatch(files, totalLabel, allResults) {
-    const BATCH_SIZE = 5;
+    const BATCH_SIZE = 2;
     for (let batchStart = 0; batchStart < files.length; batchStart += BATCH_SIZE) {
       const batch = files.slice(batchStart, batchStart + BATCH_SIZE);
       setInvoiceCurrent(batchStart + batch.length);

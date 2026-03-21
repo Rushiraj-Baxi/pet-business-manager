@@ -2,6 +2,8 @@ import os
 import math
 import re
 import uuid
+import time
+import logging
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Depends, UploadFile, File, Form
@@ -15,9 +17,11 @@ from models import Product, Sale, RawMaterial, Purchase, Expense
 from services.file_processor import process_pdf, UPLOAD_DIR
 from services.ai_service import parse_invoice_text, parse_invoice_image
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/invoices", tags=["invoices"])
 
-_executor = ThreadPoolExecutor(max_workers=4)
+_executor = ThreadPoolExecutor(max_workers=2)
 
 
 def _normalize_name(name: str) -> str:
@@ -284,16 +288,28 @@ def _process_purchase_invoice(parsed: dict, db: Session) -> dict:
 
 
 def _parse_single_file(filepath: str, ext: str, invoice_type: str) -> dict:
-    """Parse a single invoice file (runs in thread pool). Returns parsed dict."""
-    is_image = ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff")
-    if is_image:
-        return parse_invoice_image(filepath, invoice_type)
-    else:
-        text = _extract_text(filepath)
-        if text and len(text.strip()) >= 20:
-            return parse_invoice_text(text, invoice_type)
-        else:
-            return _parse_scanned_pdf(filepath, invoice_type)
+    """Parse a single invoice file with retry + exponential backoff."""
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            is_image = ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff")
+            if is_image:
+                return parse_invoice_image(filepath, invoice_type)
+            else:
+                text = _extract_text(filepath)
+                if text and len(text.strip()) >= 20:
+                    return parse_invoice_text(text, invoice_type)
+                else:
+                    return _parse_scanned_pdf(filepath, invoice_type)
+        except Exception as e:
+            err_msg = str(e).lower()
+            is_retryable = any(k in err_msg for k in ["rate", "429", "timeout", "throttl", "overloaded", "503", "500", "retry"])
+            if is_retryable and attempt < max_retries - 1:
+                wait = (2 ** attempt) * 2  # 2s, 4s, 8s
+                logger.warning(f"AI parse attempt {attempt+1} failed for {os.path.basename(filepath)}, retrying in {wait}s: {e}")
+                time.sleep(wait)
+            else:
+                raise
 
 
 @router.post("/upload")
