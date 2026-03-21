@@ -18,6 +18,15 @@ class SaleCreate(BaseModel):
     date: Optional[str] = None
 
 
+class SaleUpdate(BaseModel):
+    quantity: Optional[int] = None
+    price_per_unit: Optional[float] = None
+    customer: Optional[str] = None
+    date: Optional[str] = None
+    invoice_no: Optional[str] = None
+    taxable_amount: Optional[float] = None
+
+
 @router.get("")
 def get_sales(
     product_type: Optional[str] = None,
@@ -122,3 +131,38 @@ def delete_sale(sale_id: int, db: Session = Depends(get_db)):
     db.delete(s)
     db.commit()
     return {"ok": True}
+
+
+@router.put("/{sale_id}")
+def update_sale(sale_id: int, data: SaleUpdate, db: Session = Depends(get_db)):
+    s = db.query(Sale).filter(Sale.id == sale_id).first()
+    if not s:
+        raise HTTPException(404, "Sale not found")
+    if data.quantity is not None:
+        prod = db.query(Product).filter(Product.id == s.product_id).first()
+        if prod:
+            prod.stock += s.quantity - data.quantity
+        s.quantity = data.quantity
+        s.total_price = data.quantity * s.price_per_unit
+    if data.price_per_unit is not None:
+        s.price_per_unit = data.price_per_unit
+        s.total_price = s.quantity * data.price_per_unit
+    if data.customer is not None:
+        s.customer = data.customer
+    if data.date is not None:
+        s.date = datetime.fromisoformat(data.date)
+    if data.invoice_no is not None:
+        s.invoice_no = data.invoice_no
+    if data.taxable_amount is not None:
+        s.taxable_amount = data.taxable_amount
+    db.commit()
+    db.refresh(s)
+    return {
+        "id": s.id, "product_id": s.product_id,
+        "product_name": s.product.name, "product_type": s.product.type,
+        "product_variant": s.product.variant,
+        "quantity": s.quantity, "price_per_unit": s.price_per_unit,
+        "taxable_amount": s.taxable_amount or 0, "total_price": s.total_price,
+        "customer": s.customer, "invoice_no": s.invoice_no or "",
+        "date": s.date.isoformat() if s.date else None,
+    }

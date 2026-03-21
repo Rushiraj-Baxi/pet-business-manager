@@ -247,33 +247,40 @@ export default function Dashboard() {
   }
 
   async function _uploadBatch(files, totalLabel, allResults) {
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      setInvoiceCurrent(prev => prev + 1);
-      setInvoiceProgress(`AI is reading "${file.name}" (${totalLabel})...`);
+    const BATCH_SIZE = 5;
+    for (let batchStart = 0; batchStart < files.length; batchStart += BATCH_SIZE) {
+      const batch = files.slice(batchStart, batchStart + BATCH_SIZE);
+      setInvoiceCurrent(batchStart + batch.length);
+      setInvoiceProgress(`AI is reading ${batch.length} invoice(s) in parallel (${batchStart + 1}-${batchStart + batch.length} of ${files.length}, ${totalLabel})...`);
 
       try {
-        const result = await api.uploadInvoices([file], invoiceType);
+        const result = await api.uploadInvoices(batch, invoiceType);
         allResults.processed += result.processed || 0;
         allResults.total_imported += result.total_imported || 0;
         allResults.total_skipped += result.total_skipped || 0;
         const fileResults = result.file_results || [];
-        for (const fr of fileResults) {
-          fr._file = file; // keep ref for retries
+        for (let i = 0; i < fileResults.length; i++) {
+          const fr = fileResults[i];
+          // Match back to file by filename for retry tracking
+          const matchedFile = batch.find(f => f.name === fr.filename) || batch[i];
+          fr._file = matchedFile;
           allResults.file_results.push(fr);
         }
         if (fileResults.some(fr => fr.status === 'failed')) {
-          allResults.failed += 1;
+          allResults.failed += fileResults.filter(fr => fr.status === 'failed').length;
         }
       } catch (err) {
-        allResults.failed += 1;
-        allResults.file_results.push({
-          filename: file.name,
-          status: 'failed',
-          imported: 0,
-          errors: [err.message],
-          _file: file,
-        });
+        // If entire batch fails, mark all as failed
+        for (const file of batch) {
+          allResults.failed += 1;
+          allResults.file_results.push({
+            filename: file.name,
+            status: 'failed',
+            imported: 0,
+            errors: [err.message],
+            _file: file,
+          });
+        }
       }
 
       setInvoiceResult({ ...allResults });

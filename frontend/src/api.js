@@ -34,6 +34,7 @@ export const api = {
     return request(`/sales${q ? `?${q}` : ''}`);
   },
   createSale: (data) => request('/sales', { method: 'POST', body: JSON.stringify(data) }),
+  updateSale: (id, data) => request(`/sales/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteSale: (id) => request(`/sales/${id}`, { method: 'DELETE' }),
   getSalesTrends: (params = {}) => {
     const q = new URLSearchParams(params).toString();

@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { api } from '../api';
-import { Plus, Trash2, X, Check, ChevronUp, ChevronDown, Search } from 'lucide-react';
+import { Plus, Trash2, X, Check, ChevronUp, ChevronDown, Search, Pencil } from 'lucide-react';
 
 export default function Sales() {
   const [sales, setSales] = useState([]);
   const [products, setProducts] = useState([]);
   const [showForm, setShowForm] = useState(false);
+  const [editSale, setEditSale] = useState(null);
   const [filters, setFilters] = useState({ product_type: '', variant: '', start_date: '', end_date: '' });
   const [form, setForm] = useState({ product_id: '', quantity: '', price_per_unit: '', customer: '', date: '' });
+  const [editForm, setEditForm] = useState({});
   const [sortCol, setSortCol] = useState('date');
   const [sortDir, setSortDir] = useState('desc');
   const [searchText, setSearchText] = useState('');
@@ -51,6 +53,35 @@ export default function Sales() {
   async function remove(id) {
     if (!confirm('Delete this sale?')) return;
     await api.deleteSale(id);
+    load();
+    loadProducts();
+  }
+
+  function startEdit(s) {
+    setEditSale(s);
+    setEditForm({
+      quantity: s.quantity,
+      price_per_unit: s.price_per_unit,
+      customer: s.customer || '',
+      date: s.date ? s.date.split('T')[0] : '',
+      invoice_no: s.invoice_no || '',
+      taxable_amount: s.taxable_amount || 0,
+    });
+  }
+
+  async function saveEdit() {
+    const updates = {};
+    if (Number(editForm.quantity) !== editSale.quantity) updates.quantity = Number(editForm.quantity);
+    if (Number(editForm.price_per_unit) !== editSale.price_per_unit) updates.price_per_unit = Number(editForm.price_per_unit);
+    if (editForm.customer !== (editSale.customer || '')) updates.customer = editForm.customer;
+    if (editForm.invoice_no !== (editSale.invoice_no || '')) updates.invoice_no = editForm.invoice_no;
+    if (Number(editForm.taxable_amount) !== (editSale.taxable_amount || 0)) updates.taxable_amount = Number(editForm.taxable_amount);
+    const editDate = editForm.date || '';
+    const saleDate = editSale.date ? editSale.date.split('T')[0] : '';
+    if (editDate !== saleDate) updates.date = editForm.date;
+    if (Object.keys(updates).length === 0) { setEditSale(null); return; }
+    await api.updateSale(editSale.id, updates);
+    setEditSale(null);
     load();
     loadProducts();
   }
@@ -183,6 +214,52 @@ export default function Sales() {
         </div>
       )}
 
+      {/* Edit Modal */}
+      {editSale && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold">Edit Sale</h2>
+              <button onClick={() => setEditSale(null)}><X size={20} /></button>
+            </div>
+            <div className="text-sm text-gray-500 mb-3">Product: <span className="font-medium text-gray-800">{editSale.product_name}</span></div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Quantity</label>
+                  <input type="number" className="w-full border rounded-lg px-3 py-2 text-sm" value={editForm.quantity} onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Price/Unit (₹)</label>
+                  <input type="number" className="w-full border rounded-lg px-3 py-2 text-sm" value={editForm.price_per_unit} onChange={(e) => setEditForm({ ...editForm, price_per_unit: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Taxable Amount (₹)</label>
+                <input type="number" className="w-full border rounded-lg px-3 py-2 text-sm" value={editForm.taxable_amount} onChange={(e) => setEditForm({ ...editForm, taxable_amount: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Customer</label>
+                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editForm.customer} onChange={(e) => setEditForm({ ...editForm, customer: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Invoice No</label>
+                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={editForm.invoice_no} onChange={(e) => setEditForm({ ...editForm, invoice_no: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Date</label>
+                  <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={editForm.date} onChange={(e) => setEditForm({ ...editForm, date: e.target.value })} />
+                </div>
+              </div>
+              <button onClick={saveEdit} className="w-full bg-green-600 text-white py-2 rounded-lg text-sm hover:bg-green-700 flex items-center justify-center gap-2">
+                <Check size={16} /> Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Table */}
       <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
         <table className="w-full text-sm min-w-[1050px]">
@@ -227,7 +304,10 @@ export default function Sales() {
                   <td className="px-4 py-3 text-right font-medium text-blue-700">₹{s.total_price.toLocaleString('en-IN')}</td>
                   <td className="px-4 py-3">{s.customer || '-'}</td>
                   <td className="px-4 py-3 text-center">
-                    <button onClick={() => remove(s.id)} className="text-gray-400 hover:text-red-600"><Trash2 size={16} /></button>
+                    <div className="flex items-center justify-center gap-1">
+                      <button onClick={() => startEdit(s)} className="text-gray-400 hover:text-blue-600"><Pencil size={15} /></button>
+                      <button onClick={() => remove(s.id)} className="text-gray-400 hover:text-red-600"><Trash2 size={15} /></button>
+                    </div>
                   </td>
                 </tr>
               );
