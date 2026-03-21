@@ -49,6 +49,7 @@ def get_sales(
             "taxable_amount": s.taxable_amount or 0,
             "total_price": s.total_price,
             "customer": s.customer,
+            "invoice_no": s.invoice_no or "",
             "date": s.date.isoformat() if s.date else None,
         })
     return result

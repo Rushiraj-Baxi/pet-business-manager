@@ -180,13 +180,17 @@ def customer_analysis(days: int = Query(365), db: Session = Depends(get_db)):
         if pname not in by_product:
             by_product[pname] = {}
         if cust not in by_product[pname]:
-            by_product[pname][cust] = {"customer": cust, "orders": 0, "total_qty": 0, "total_revenue": 0}
-        by_product[pname][cust]["orders"] += 1
+            by_product[pname][cust] = {"customer": cust, "orders": set(), "total_qty": 0, "total_revenue": 0}
+        # An order = unique invoice_no (or unique date if no invoice_no)
+        order_key = s.invoice_no.strip() if s.invoice_no and s.invoice_no.strip() else f"_sale_{s.id}"
+        by_product[pname][cust]["orders"].add(order_key)
         by_product[pname][cust]["total_qty"] += s.quantity
         by_product[pname][cust]["total_revenue"] += s.total_price
 
     top_per_product = {}
     for pname, customers in by_product.items():
+        for c in customers.values():
+            c["orders"] = len(c["orders"])
         sorted_custs = sorted(customers.values(), key=lambda x: x["orders"], reverse=True)
         top_per_product[pname] = sorted_custs[:5]
         for c in top_per_product[pname]:
@@ -199,16 +203,23 @@ def customer_analysis(days: int = Query(365), db: Session = Depends(get_db)):
         if not cust:
             continue
         if cust not in overall:
-            overall[cust] = {"customer": cust, "orders": 0, "total_qty": 0, "total_revenue": 0, "products": set()}
-        overall[cust]["orders"] += 1
+            overall[cust] = {"customer": cust, "orders": set(), "total_qty": 0, "total_revenue": 0, "products": set()}
+        order_key = s.invoice_no.strip() if s.invoice_no and s.invoice_no.strip() else f"_sale_{s.id}"
+        overall[cust]["orders"].add(order_key)
         overall[cust]["total_qty"] += s.quantity
         overall[cust]["total_revenue"] += s.total_price
         overall[cust]["products"].add(s.product.name)
 
-    overall_list = sorted(overall.values(), key=lambda x: x["total_revenue"], reverse=True)
-    for c in overall_list:
-        c["products"] = list(c["products"])
-        c["total_revenue"] = round(c["total_revenue"], 2)
+    overall_list = []
+    for c in overall.values():
+        overall_list.append({
+            "customer": c["customer"],
+            "orders": len(c["orders"]),
+            "total_qty": c["total_qty"],
+            "total_revenue": round(c["total_revenue"], 2),
+            "products": list(c["products"]),
+        })
+    overall_list.sort(key=lambda x: x["total_revenue"], reverse=True)
 
     return {"top_per_product": top_per_product, "overall": overall_list[:20]}
 
@@ -613,7 +624,7 @@ def customer_loyalty(db: Session = Depends(get_db)):
                 "customer": cust,
                 "first_order": s.date,
                 "last_order": s.date,
-                "total_orders": 0,
+                "order_keys": set(),
                 "total_qty": 0,
                 "total_revenue": 0,
                 "products": set(),
@@ -623,7 +634,8 @@ def customer_loyalty(db: Session = Depends(get_db)):
             c["first_order"] = s.date
         if s.date > c["last_order"]:
             c["last_order"] = s.date
-        c["total_orders"] += 1
+        order_key = s.invoice_no.strip() if s.invoice_no and s.invoice_no.strip() else f"_sale_{s.id}"
+        c["order_keys"].add(order_key)
         c["total_qty"] += s.quantity
         c["total_revenue"] += s.total_price
         c["products"].add(s.product.name)
@@ -631,17 +643,18 @@ def customer_loyalty(db: Session = Depends(get_db)):
     result = []
     for c in customers.values():
         duration_days = (c["last_order"] - c["first_order"]).days
+        total_orders = len(c["order_keys"])
         result.append({
             "customer": c["customer"],
             "first_order": c["first_order"].strftime("%Y-%m-%d"),
             "last_order": c["last_order"].strftime("%Y-%m-%d"),
             "duration_days": duration_days,
             "duration_label": f"{duration_days // 30}m {duration_days % 30}d" if duration_days > 30 else f"{duration_days}d",
-            "total_orders": c["total_orders"],
+            "total_orders": total_orders,
             "total_qty": c["total_qty"],
             "total_revenue": round(c["total_revenue"], 2),
             "products": list(c["products"]),
-            "avg_order_value": round(c["total_revenue"] / c["total_orders"], 2) if c["total_orders"] else 0,
+            "avg_order_value": round(c["total_revenue"] / total_orders, 2) if total_orders else 0,
         })
 
     return sorted(result, key=lambda x: x["total_revenue"], reverse=True)

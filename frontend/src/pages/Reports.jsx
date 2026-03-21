@@ -104,7 +104,7 @@ function MonthlySales() {
 function TopPerformers() {
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
-  useEffect(() => { api.getReport('top-performers?days=90').then(setData).finally(() => setLoading(false)); }, []);
+  useEffect(() => { api.getReport('top-performers?days=365').then(setData).finally(() => setLoading(false)); }, []);
   if (loading) return <Loader />;
 
   return (

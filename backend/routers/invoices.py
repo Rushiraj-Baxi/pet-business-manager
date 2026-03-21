@@ -61,6 +61,25 @@ def _find_material_fuzzy(db: Session, name: str):
     return None
 
 
+def _normalize_customer(name: str) -> str:
+    """Normalize a customer name for consistency.
+    e.g. 'M/S SURAKSHPET' = 'SURAKSHPET', '&' = 'and', consistent casing.
+    """
+    s = name.strip()
+    if not s:
+        return s
+    # Remove M/S, M/s, m/s prefix
+    s = re.sub(r'^[Mm]/[Ss]\s+', '', s)
+    # Title case
+    s = s.title()
+    # Normalize & vs and
+    s = re.sub(r'\s*&\s*', ' And ', s)
+    s = re.sub(r'\bAnd\b', 'And', s)
+    # Collapse whitespace
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
+
+
 def _safe_float(val, default=0.0) -> float:
     try:
         v = float(val)
@@ -143,7 +162,7 @@ def _parse_scanned_pdf(filepath: str, invoice_type: str) -> dict:
 def _process_sales_invoice(parsed: dict, db: Session) -> dict:
     """Create sales records from parsed invoice data."""
     result = {"imported": 0, "skipped": 0, "details": [], "errors": []}
-    party = (parsed.get("party_name") or "").strip()
+    party = _normalize_customer((parsed.get("party_name") or "").strip())
     inv_no = parsed.get("invoice_no") or ""
     inv_date = _parse_date(parsed.get("date"))
 
@@ -190,6 +209,7 @@ def _process_sales_invoice(parsed: dict, db: Session) -> dict:
                 total_price=total,
                 taxable_amount=taxable,
                 customer=party,
+                invoice_no=inv_no,
                 date=inv_date,
             )
             product.stock -= qty
@@ -206,7 +226,7 @@ def _process_sales_invoice(parsed: dict, db: Session) -> dict:
 def _process_purchase_invoice(parsed: dict, db: Session) -> dict:
     """Create purchase records and expenses from parsed invoice data."""
     result = {"imported": 0, "skipped": 0, "details": [], "errors": []}
-    supplier = (parsed.get("party_name") or "").strip()
+    supplier = _normalize_customer((parsed.get("party_name") or "").strip())
     inv_no = parsed.get("invoice_no") or ""
     inv_date = _parse_date(parsed.get("date"))
 
