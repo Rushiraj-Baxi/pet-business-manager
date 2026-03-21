@@ -2,26 +2,18 @@ import os
 import math
 import re
 import uuid
-import time
-import logging
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Depends, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, timezone
 from typing import List
 
-from database import get_db, SessionLocal
+from database import get_db
 from models import Product, Sale, RawMaterial, Purchase, Expense
 from services.file_processor import process_pdf, UPLOAD_DIR
 from services.ai_service import parse_invoice_text, parse_invoice_image
 
-logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/api/invoices", tags=["invoices"])
-
-_executor = ThreadPoolExecutor(max_workers=2)
 
 
 def _normalize_name(name: str) -> str:
@@ -287,38 +279,13 @@ def _process_purchase_invoice(parsed: dict, db: Session) -> dict:
     return result
 
 
-def _parse_single_file(filepath: str, ext: str, invoice_type: str) -> dict:
-    """Parse a single invoice file with retry + exponential backoff."""
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            is_image = ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff")
-            if is_image:
-                return parse_invoice_image(filepath, invoice_type)
-            else:
-                text = _extract_text(filepath)
-                if text and len(text.strip()) >= 20:
-                    return parse_invoice_text(text, invoice_type)
-                else:
-                    return _parse_scanned_pdf(filepath, invoice_type)
-        except Exception as e:
-            err_msg = str(e).lower()
-            is_retryable = any(k in err_msg for k in ["rate", "429", "timeout", "throttl", "overloaded", "503", "500", "retry"])
-            if is_retryable and attempt < max_retries - 1:
-                wait = (2 ** attempt) * 2  # 2s, 4s, 8s
-                logger.warning(f"AI parse attempt {attempt+1} failed for {os.path.basename(filepath)}, retrying in {wait}s: {e}")
-                time.sleep(wait)
-            else:
-                raise
-
-
 @router.post("/upload")
 async def upload_invoices(
     files: List[UploadFile] = File(...),
     invoice_type: str = Form("sales"),
     db: Session = Depends(get_db),
 ):
-    """Upload multiple invoice files (PDF/images), parse with AI in parallel, and import."""
+    """Upload invoice files (PDF/images), parse with AI one at a time, and import."""
     total_results = {
         "total_files": len(files),
         "processed": 0,
@@ -328,8 +295,6 @@ async def upload_invoices(
         "file_results": [],
     }
 
-    # Phase 1: Save all files and prepare tasks
-    tasks = []
     for file in files:
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in (".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tiff"):
@@ -347,74 +312,57 @@ async def upload_invoices(
         contents = await file.read()
         with open(filepath, "wb") as f:
             f.write(contents)
-        tasks.append({"filename": file.filename, "filepath": filepath, "ext": ext})
 
-    # Phase 2: Parse all files in parallel using thread pool
-    loop = asyncio.get_event_loop()
-    parse_futures = []
-    for task in tasks:
-        future = loop.run_in_executor(
-            _executor,
-            _parse_single_file,
-            task["filepath"], task["ext"], invoice_type,
-        )
-        parse_futures.append((task, future))
-
-    parse_results = []
-    for task, future in parse_futures:
-        try:
-            parsed = await future
-            parse_results.append({"task": task, "parsed": parsed, "error": None})
-        except Exception as e:
-            parse_results.append({"task": task, "parsed": None, "error": str(e)})
-
-    # Phase 3: Import into DB sequentially (DB operations must be serial)
-    for pr in parse_results:
-        task = pr["task"]
         file_result = {
-            "filename": task["filename"],
+            "filename": file.filename,
             "status": "processing",
             "imported": 0,
             "details": [],
             "errors": [],
         }
 
-        if pr["error"]:
-            file_result["status"] = "failed"
-            file_result["errors"].append(pr["error"])
-            total_results["failed"] += 1
-        else:
-            try:
-                parsed = pr["parsed"]
-                if invoice_type == "sales":
-                    import_result = _process_sales_invoice(parsed, db)
+        try:
+            # Parse with AI
+            is_image = ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff")
+            if is_image:
+                parsed = parse_invoice_image(filepath, invoice_type)
+            else:
+                text = _extract_text(filepath)
+                if text and len(text.strip()) >= 20:
+                    parsed = parse_invoice_text(text, invoice_type)
                 else:
-                    import_result = _process_purchase_invoice(parsed, db)
+                    parsed = _parse_scanned_pdf(filepath, invoice_type)
 
-                db.commit()
+            # Import into DB
+            if invoice_type == "sales":
+                import_result = _process_sales_invoice(parsed, db)
+            else:
+                import_result = _process_purchase_invoice(parsed, db)
 
-                file_result["status"] = "success" if import_result["imported"] > 0 else "no_data"
-                file_result["imported"] = import_result["imported"]
-                file_result["details"] = import_result["details"]
-                file_result["errors"] = import_result["errors"]
-                file_result["invoice_no"] = parsed.get("invoice_no")
-                file_result["party"] = parsed.get("party_name")
-                file_result["date"] = parsed.get("date")
+            db.commit()
 
-                total_results["total_imported"] += import_result["imported"]
-                total_results["total_skipped"] += import_result["skipped"]
-                total_results["processed"] += 1
-            except Exception as e:
-                db.rollback()
-                file_result["status"] = "failed"
-                file_result["errors"].append(str(e))
-                total_results["failed"] += 1
+            file_result["status"] = "success" if import_result["imported"] > 0 else "no_data"
+            file_result["imported"] = import_result["imported"]
+            file_result["details"] = import_result["details"]
+            file_result["errors"] = import_result["errors"]
+            file_result["invoice_no"] = parsed.get("invoice_no")
+            file_result["party"] = parsed.get("party_name")
+            file_result["date"] = parsed.get("date")
+
+            total_results["total_imported"] += import_result["imported"]
+            total_results["total_skipped"] += import_result["skipped"]
+            total_results["processed"] += 1
+        except Exception as e:
+            db.rollback()
+            file_result["status"] = "failed"
+            file_result["errors"].append(str(e))
+            total_results["failed"] += 1
 
         total_results["file_results"].append(file_result)
 
         # Clean up temp file
         try:
-            os.remove(task["filepath"])
+            os.remove(filepath)
         except OSError:
             pass
 

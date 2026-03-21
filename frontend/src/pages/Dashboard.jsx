@@ -247,11 +247,10 @@ export default function Dashboard() {
   }
 
   async function _uploadBatch(files, totalLabel, allResults) {
-    const BATCH_SIZE = 2;
-    for (let batchStart = 0; batchStart < files.length; batchStart += BATCH_SIZE) {
-      const batch = files.slice(batchStart, batchStart + BATCH_SIZE);
-      setInvoiceCurrent(batchStart + batch.length);
-      setInvoiceProgress(`AI is reading ${batch.length} invoice(s) in parallel (${batchStart + 1}-${batchStart + batch.length} of ${files.length}, ${totalLabel})...`);
+    for (let i = 0; i < files.length; i++) {
+      const batch = [files[i]];
+      setInvoiceCurrent(i + 1);
+      setInvoiceProgress(`AI is reading invoice ${i + 1} of ${files.length} (${totalLabel})...`);
 
       try {
         const result = await api.uploadInvoices(batch, invoiceType);
