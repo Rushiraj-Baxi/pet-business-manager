@@ -482,13 +482,166 @@ def _execute_actions(actions: list[dict], db: Session) -> list[dict]:
                 if not old_name or not new_name:
                     results.append({"ok": False, "action": atype, "detail": "Need old_name and new_name"})
                     continue
-                # Find all sales where customer matches (case-insensitive contains)
                 all_sales = db.query(Sale).all()
                 matched = [s for s in all_sales if old_name.lower() in (s.customer or "").lower()]
                 for s in matched:
                     s.customer = new_name
                 db.flush()
                 results.append({"ok": True, "action": atype, "detail": f"Updated customer name from '{old_name}' to '{new_name}' on {len(matched)} sale(s)", "affected": ["sales", "dashboard", "analytics"]})
+
+            # ── FIND AND UPDATE SALE (no ID needed) ─────────
+            elif atype == "find_and_update_sale":
+                query = db.query(Sale).join(Product)
+                if "find_date" in action:
+                    d = datetime.fromisoformat(action["find_date"]).date()
+                    query = query.filter(func.date(Sale.date) == d)
+                if "find_customer" in action:
+                    query = query.filter(func.lower(Sale.customer).contains(action["find_customer"].strip().lower()))
+                if "find_product" in action:
+                    prod = _find_product(db, action["find_product"])
+                    if prod:
+                        query = query.filter(Sale.product_id == prod.id)
+                if "find_invoice" in action:
+                    query = query.filter(func.lower(Sale.invoice_no) == action["find_invoice"].strip().lower())
+                matched = query.all()
+                if not matched:
+                    results.append({"ok": False, "action": atype, "detail": "No matching sales found"})
+                    continue
+                for sale in matched:
+                    if "customer" in action:
+                        sale.customer = action["customer"]
+                    if "quantity" in action:
+                        old_qty = sale.quantity
+                        new_qty = int(action["quantity"])
+                        prod = db.query(Product).get(sale.product_id)
+                        if prod:
+                            prod.stock += old_qty - new_qty
+                        sale.quantity = new_qty
+                        sale.total_price = new_qty * sale.price_per_unit
+                    if "price_per_unit" in action:
+                        sale.price_per_unit = float(action["price_per_unit"])
+                        sale.total_price = sale.quantity * sale.price_per_unit
+                    if "invoice_no" in action:
+                        sale.invoice_no = action["invoice_no"]
+                    if "date" in action:
+                        sale.date = datetime.fromisoformat(action["date"])
+                    if "taxable_amount" in action:
+                        sale.taxable_amount = float(action["taxable_amount"])
+                    if "igst" in action:
+                        sale.igst = float(action["igst"])
+                    if "sgst" in action:
+                        sale.sgst = float(action["sgst"])
+                    if "cgst" in action:
+                        sale.cgst = float(action["cgst"])
+                db.flush()
+                results.append({"ok": True, "action": atype, "detail": f"Updated {len(matched)} sale(s) matching criteria", "affected": ["sales", "dashboard", "analytics"]})
+
+            # ── FIND AND DELETE SALE (no ID needed) ─────────
+            elif atype == "find_and_delete_sale":
+                query = db.query(Sale).join(Product)
+                if "find_date" in action:
+                    d = datetime.fromisoformat(action["find_date"]).date()
+                    query = query.filter(func.date(Sale.date) == d)
+                if "find_customer" in action:
+                    query = query.filter(func.lower(Sale.customer).contains(action["find_customer"].strip().lower()))
+                if "find_product" in action:
+                    prod = _find_product(db, action["find_product"])
+                    if prod:
+                        query = query.filter(Sale.product_id == prod.id)
+                if "find_invoice" in action:
+                    query = query.filter(func.lower(Sale.invoice_no) == action["find_invoice"].strip().lower())
+                matched = query.all()
+                if not matched:
+                    results.append({"ok": False, "action": atype, "detail": "No matching sales found"})
+                    continue
+                for sale in matched:
+                    prod = db.query(Product).get(sale.product_id)
+                    if prod:
+                        prod.stock += sale.quantity
+                    db.delete(sale)
+                db.flush()
+                results.append({"ok": True, "action": atype, "detail": f"Deleted {len(matched)} sale(s) matching criteria", "affected": ["sales", "dashboard", "analytics"]})
+
+            # ── FIND AND UPDATE PURCHASE (no ID needed) ─────
+            elif atype == "find_and_update_purchase":
+                query = db.query(Purchase).join(RawMaterial)
+                if "find_date" in action:
+                    d = datetime.fromisoformat(action["find_date"]).date()
+                    query = query.filter(func.date(Purchase.date) == d)
+                if "find_supplier" in action:
+                    query = query.filter(func.lower(Purchase.supplier).contains(action["find_supplier"].strip().lower()))
+                if "find_material" in action:
+                    mat = _find_material(db, action["find_material"])
+                    if mat:
+                        query = query.filter(Purchase.raw_material_id == mat.id)
+                matched = query.all()
+                if not matched:
+                    results.append({"ok": False, "action": atype, "detail": "No matching purchases found"})
+                    continue
+                for pur in matched:
+                    if "quantity" in action:
+                        mat = db.query(RawMaterial).get(pur.raw_material_id)
+                        if mat:
+                            mat.current_stock += float(action["quantity"]) - pur.quantity
+                        pur.quantity = float(action["quantity"])
+                        pur.total_price = pur.quantity * pur.price_per_unit
+                    if "price_per_unit" in action:
+                        pur.price_per_unit = float(action["price_per_unit"])
+                        pur.total_price = pur.quantity * pur.price_per_unit
+                    if "supplier" in action:
+                        pur.supplier = action["supplier"]
+                db.flush()
+                results.append({"ok": True, "action": atype, "detail": f"Updated {len(matched)} purchase(s) matching criteria", "affected": ["materials", "dashboard"]})
+
+            # ── FIND AND UPDATE EXPENSE (no ID needed) ──────
+            elif atype == "find_and_update_expense":
+                query = db.query(Expense)
+                if "find_date" in action:
+                    d = datetime.fromisoformat(action["find_date"]).date()
+                    query = query.filter(func.date(Expense.date) == d)
+                if "find_category" in action:
+                    query = query.filter(func.lower(Expense.category).contains(action["find_category"].strip().lower()))
+                if "find_description" in action:
+                    query = query.filter(func.lower(Expense.description).contains(action["find_description"].strip().lower()))
+                matched = query.all()
+                if not matched:
+                    results.append({"ok": False, "action": atype, "detail": "No matching expenses found"})
+                    continue
+                for exp in matched:
+                    if "category" in action:
+                        exp.category = action["category"]
+                    if "amount" in action:
+                        exp.amount = float(action["amount"])
+                    if "description" in action:
+                        exp.description = action["description"]
+                db.flush()
+                results.append({"ok": True, "action": atype, "detail": f"Updated {len(matched)} expense(s) matching criteria", "affected": ["analytics", "dashboard"]})
+
+            # ── FIND AND UPDATE PRODUCTION (no ID needed) ───
+            elif atype == "find_and_update_production":
+                query = db.query(Production).join(Product)
+                if "find_date" in action:
+                    d = datetime.fromisoformat(action["find_date"]).date()
+                    query = query.filter(func.date(Production.date) == d)
+                if "find_product" in action:
+                    prod = _find_product(db, action["find_product"])
+                    if prod:
+                        query = query.filter(Production.product_id == prod.id)
+                matched = query.all()
+                if not matched:
+                    results.append({"ok": False, "action": atype, "detail": "No matching production records found"})
+                    continue
+                for rec in matched:
+                    if "quantity_produced" in action:
+                        rec.quantity_produced = int(action["quantity_produced"])
+                    if "raw_material_used" in action:
+                        rec.raw_material_used = float(action["raw_material_used"])
+                    if "wastage" in action:
+                        rec.wastage = float(action["wastage"])
+                    if "hours_run" in action:
+                        rec.hours_run = float(action["hours_run"])
+                db.flush()
+                results.append({"ok": True, "action": atype, "detail": f"Updated {len(matched)} production record(s) matching criteria", "affected": ["production", "dashboard"]})
 
             # ── UPDATE SALE ─────────────────────────────────
             elif atype == "update_sale":
@@ -630,11 +783,11 @@ def send_message(data: ChatRequest, db: Session = Depends(get_db)):
     business_entries = db.query(BusinessEntry).all()
     machines = db.query(Machine).all()
 
-    # Recent sales with IDs (for deletion references)
-    recent_sales = db.query(Sale).join(Product).order_by(Sale.date.desc()).limit(20).all()
-    recent_productions = db.query(Production).order_by(Production.date.desc()).limit(10).all()
-    recent_expenses = db.query(Expense).order_by(Expense.date.desc()).limit(10).all()
-    recent_purchases = db.query(Purchase).order_by(Purchase.date.desc()).limit(10).all()
+    # ALL sales with IDs (so AI can reference any record, not just recent)
+    all_sales_for_ctx = db.query(Sale).join(Product).order_by(Sale.date.desc()).all()
+    all_productions_for_ctx = db.query(Production).order_by(Production.date.desc()).all()
+    all_expenses_for_ctx = db.query(Expense).order_by(Expense.date.desc()).all()
+    all_purchases_for_ctx = db.query(Purchase).order_by(Purchase.date.desc()).all()
 
     total_revenue = sum(s.total_price for s in sales)
     total_units = sum(s.quantity for s in sales)
@@ -670,10 +823,10 @@ def send_message(data: ChatRequest, db: Session = Depends(get_db)):
         "materials": [{"id": m.id, "name": m.name, "stock": m.current_stock, "unit": m.unit, "price": m.price_per_unit, "reorder_level": m.reorder_level} for m in materials],
         "sales_by_product": list(sales_by_product.values()),
         "sales_by_variant": list(sales_by_variant.values()),
-        "recent_sales": [{"id": s.id, "product": s.product.name, "qty": s.quantity, "total": s.total_price, "customer": s.customer, "date": s.date.strftime("%Y-%m-%d") if s.date else ""} for s in recent_sales],
-        "recent_productions": [{"id": p.id, "product": p.product.name, "material": p.raw_material.name, "qty": p.quantity_produced, "used": p.raw_material_used, "wastage": p.wastage, "date": p.date.strftime("%Y-%m-%d") if p.date else ""} for p in recent_productions],
-        "recent_expenses": [{"id": e.id, "category": e.category, "amount": e.amount, "description": e.description, "date": e.date.strftime("%Y-%m-%d") if e.date else ""} for e in recent_expenses],
-        "recent_purchases": [{"id": p.id, "material": p.raw_material.name, "qty": p.quantity, "price": p.price_per_unit, "total": p.total_price, "supplier": p.supplier, "date": p.date.strftime("%Y-%m-%d") if p.date else ""} for p in recent_purchases],
+        "all_sales": [{"id": s.id, "product": s.product.name, "qty": s.quantity, "total": s.total_price, "customer": s.customer, "date": s.date.strftime("%Y-%m-%d") if s.date else "", "invoice_no": s.invoice_no or ""} for s in all_sales_for_ctx],
+        "all_productions": [{"id": p.id, "product": p.product.name, "material": p.raw_material.name, "qty": p.quantity_produced, "used": p.raw_material_used, "wastage": p.wastage, "date": p.date.strftime("%Y-%m-%d") if p.date else ""} for p in all_productions_for_ctx],
+        "all_expenses": [{"id": e.id, "category": e.category, "amount": e.amount, "description": e.description, "date": e.date.strftime("%Y-%m-%d") if e.date else ""} for e in all_expenses_for_ctx],
+        "all_purchases": [{"id": p.id, "material": p.raw_material.name, "qty": p.quantity, "price": p.price_per_unit, "total": p.total_price, "supplier": p.supplier, "date": p.date.strftime("%Y-%m-%d") if p.date else ""} for p in all_purchases_for_ctx],
         "custom_charts": [{"id": c.id, "title": c.title, "chart_type": c.chart_type, "data_source": c.data_source, "page": c.page} for c in charts],
         "business_entries": [{"id": e.id, "category": e.category, "label": e.label, "amount": e.amount} for e in business_entries],
         "machines": [{"id": m.id, "name": m.name, "type": m.machine_type, "capacity_per_hour": m.capacity_per_hour, "status": m.status} for m in machines],

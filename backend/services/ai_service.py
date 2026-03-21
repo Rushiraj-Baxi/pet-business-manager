@@ -156,19 +156,46 @@ Wrap actions between <<<ACTIONS>>> and <<<END_ACTIONS>>> markers. JSON must be a
     of the same product name (different casing, spacing, unit abbreviations like 26g vs 26gm).
 
 ── UPDATE / EDIT EXISTING RECORDS ──
-27. update_sale (edit any field on an existing sale)
-    {"type": "update_sale", "sale_id": 5, "quantity": 600, "price_per_unit": 2.5, "customer": "New Corp", "date": "2026-03-15", "taxable_amount": 1500, "igst": 0, "sgst": 135, "cgst": 135, "invoice_no": "INV-002"}
-    Only include fields you want to change. Use sale_id from recent_sales in context.
+You have TWO ways to update records:
+  A) By ID: Use update_sale, update_purchase, etc. with the record ID from all_sales/all_purchases in context.
+  B) By Search (NO ID needed): Use find_and_update_sale, find_and_delete_sale, etc. to find records by date/customer/product/invoice and modify them.
+  PREFER find-based actions when you don't have the ID handy. They search the ENTIRE database.
 
-28. update_purchase (edit any field on an existing purchase)
+27. update_sale (edit by ID)
+    {"type": "update_sale", "sale_id": 5, "quantity": 600, "price_per_unit": 2.5, "customer": "New Corp", "date": "2026-03-15", "taxable_amount": 1500, "igst": 0, "sgst": 135, "cgst": 135, "invoice_no": "INV-002"}
+    Only include fields you want to change. Use sale_id from all_sales in context.
+
+28. update_purchase (edit by ID)
     {"type": "update_purchase", "purchase_id": 3, "quantity": 2000, "price_per_unit": 90, "supplier": "New Supplier"}
     Only include fields you want to change.
 
-29. update_expense (edit any field on an existing expense)
+29. update_expense (edit by ID)
     {"type": "update_expense", "expense_id": 1, "category": "Electricity", "amount": 20000, "description": "Updated bill"}
 
-30. update_production (edit any field on an existing production record)
+30. update_production (edit by ID)
     {"type": "update_production", "production_id": 2, "quantity_produced": 1500, "raw_material_used": 30.0, "wastage": 0.8, "hours_run": 10}
+
+── FIND-BASED UPDATE/DELETE (NO ID NEEDED) ──
+These actions search the ENTIRE database by criteria and update/delete ALL matches. Use find_ prefixed fields to search.
+
+32. find_and_update_sale (find by date/customer/product/invoice, update matching sales)
+    {"type": "find_and_update_sale", "find_date": "2025-04-09", "find_customer": "SURAKSHPET", "find_product": "PET Preforms 26gm", "customer": "M/S Suraksh Pet"}
+    find_ fields = search criteria (any combo of: find_date, find_customer, find_product, find_invoice)
+    Other fields = what to update (customer, quantity, price_per_unit, invoice_no, date, taxable_amount, igst, sgst, cgst)
+    Updates ALL matching sales. Use at least one find_ field.
+
+33. find_and_delete_sale (find by criteria, delete matching sales)
+    {"type": "find_and_delete_sale", "find_date": "2025-04-09", "find_customer": "SURAKSHPET", "find_product": "PET Preforms 26gm"}
+    Deletes ALL matching sales and restores product stock.
+
+34. find_and_update_purchase (find by date/supplier/material, update matching purchases)
+    {"type": "find_and_update_purchase", "find_date": "2025-03-01", "find_supplier": "XYZ", "find_material": "PET Resin", "quantity": 2000, "price_per_unit": 90, "supplier": "New Name"}
+
+35. find_and_update_expense (find by date/category/description, update matching expenses)
+    {"type": "find_and_update_expense", "find_date": "2025-03-01", "find_category": "Electricity", "amount": 20000}
+
+36. find_and_update_production (find by date/product, update matching production records)
+    {"type": "find_and_update_production", "find_date": "2025-03-01", "find_product": "PET Preforms 26gm", "quantity_produced": 1500}
 
 ── BULK UPDATE CUSTOMER NAME ──
 31. bulk_update_customer (rename a customer across ALL sales, not just recent ones)
@@ -301,6 +328,22 @@ Done! I've updated the customer name from "SURAKSHPET" to "M/S Suraksh Pet" acro
 
 <<<ACTIONS>>>
 [{"type":"bulk_update_customer","old_name":"SURAKSHPET","new_name":"M/S Suraksh Pet"}]
+<<<END_ACTIONS>>>
+
+User: "Change the customer name on the sale of PET Preforms 26gm on 9/4/2025 to M/S Suraksh Pet"
+
+Done! I found and updated the sale.
+
+<<<ACTIONS>>>
+[{"type":"find_and_update_sale","find_date":"2025-04-09","find_product":"PET Preforms 26gm","customer":"M/S Suraksh Pet"}]
+<<<END_ACTIONS>>>
+
+User: "Delete all sales to SURAKSHPET on 9th April 2025"
+
+Done! Deleted the matching sales.
+
+<<<ACTIONS>>>
+[{"type":"find_and_delete_sale","find_date":"2025-04-09","find_customer":"SURAKSHPET"}]
 <<<END_ACTIONS>>>"""
 
 
