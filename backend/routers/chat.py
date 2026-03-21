@@ -475,6 +475,21 @@ def _execute_actions(actions: list[dict], db: Session) -> list[dict]:
                     db.flush()
                 results.append({"ok": True, "action": atype, "detail": f"Merged {merged_count} product(s) into '{target_name}'", "affected": ["products", "sales", "dashboard", "analytics"]})
 
+            # ── BULK UPDATE CUSTOMER NAME ───────────────────
+            elif atype == "bulk_update_customer":
+                old_name = action.get("old_name", "").strip()
+                new_name = action.get("new_name", "").strip()
+                if not old_name or not new_name:
+                    results.append({"ok": False, "action": atype, "detail": "Need old_name and new_name"})
+                    continue
+                # Find all sales where customer matches (case-insensitive contains)
+                all_sales = db.query(Sale).all()
+                matched = [s for s in all_sales if old_name.lower() in (s.customer or "").lower()]
+                for s in matched:
+                    s.customer = new_name
+                db.flush()
+                results.append({"ok": True, "action": atype, "detail": f"Updated customer name from '{old_name}' to '{new_name}' on {len(matched)} sale(s)", "affected": ["sales", "dashboard", "analytics"]})
+
             # ── UPDATE SALE ─────────────────────────────────
             elif atype == "update_sale":
                 sale = db.query(Sale).get(int(action["sale_id"]))

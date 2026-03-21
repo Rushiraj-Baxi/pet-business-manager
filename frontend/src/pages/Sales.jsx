@@ -11,7 +11,6 @@ export default function Sales() {
   const [sortCol, setSortCol] = useState('date');
   const [sortDir, setSortDir] = useState('desc');
   const [searchText, setSearchText] = useState('');
-  const [groupByInvoice, setGroupByInvoice] = useState(true);
 
   useEffect(() => { loadProducts(); }, []);
   useEffect(() => { load(); }, [filters]);
@@ -91,20 +90,7 @@ export default function Sales() {
     return arr;
   }, [filtered, sortCol, sortDir]);
 
-  // Group by invoice_no
-  const grouped = useMemo(() => {
-    if (!groupByInvoice) return null;
-    const groups = {};
-    for (const s of sorted) {
-      const key = (s.invoice_no && s.invoice_no.trim()) ? s.invoice_no.trim() : `_single_${s.id}`;
-      if (!groups[key]) groups[key] = { invoice_no: s.invoice_no || '', customer: s.customer, date: s.date, items: [], total: 0, totalTaxable: 0, totalQty: 0 };
-      groups[key].items.push(s);
-      groups[key].total += s.total_price;
-      groups[key].totalTaxable += (s.taxable_amount || 0);
-      groups[key].totalQty += s.quantity;
-    }
-    return Object.values(groups);
-  }, [sorted, groupByInvoice]);
+
 
   function handleSort(col) {
     if (sortCol === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
@@ -165,12 +151,6 @@ export default function Sales() {
             <input value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Product, customer, invoice..." className="w-full border rounded-lg pl-8 pr-3 py-2 text-sm" />
           </div>
         </div>
-        <div>
-          <label className="text-xs text-gray-500 mb-1 block">Group</label>
-          <button onClick={() => setGroupByInvoice(!groupByInvoice)} className={`px-3 py-2 rounded-lg text-sm border ${groupByInvoice ? 'bg-blue-600 text-white' : 'bg-white text-gray-700'}`}>
-            {groupByInvoice ? 'By Invoice' : 'Flat List'}
-          </button>
-        </div>
       </div>
       <div className="text-sm text-gray-500 text-right">
         <span className="font-semibold text-gray-800">{totalQty}</span> units | <span className="font-semibold text-gray-800">₹{totalTaxable.toLocaleString('en-IN', {maximumFractionDigits: 0})}</span> taxable | <span className="font-semibold text-blue-700">₹{totalRevenue.toLocaleString('en-IN', {maximumFractionDigits: 0})}</span> with tax
@@ -228,69 +208,12 @@ export default function Sales() {
             </tr>
           </thead>
           <tbody>
-            {groupByInvoice && grouped ? (
-              grouped.map((group, gi) => {
-                const isMulti = group.items.length > 1 && group.invoice_no;
-                return isMulti ? (
-                  <React.Fragment key={gi}>
-                    {/* Order header row */}
-                    <tr className="bg-blue-50 border-b border-blue-100">
-                      <td className="px-4 py-2 font-medium text-blue-800">{new Date(group.date).toLocaleDateString()}</td>
-                      <td className="px-4 py-2 font-medium text-blue-700">{group.invoice_no}</td>
-                      <td colSpan={3} className="px-4 py-2 text-blue-600 text-xs">{group.items.length} items</td>
-                      <td className="px-4 py-2 text-right font-medium text-blue-800">{group.totalQty.toLocaleString('en-IN')}</td>
-                      <td className="px-4 py-2"></td>
-                      <td className="px-4 py-2 text-right font-medium text-blue-800">₹{group.totalTaxable.toLocaleString('en-IN', {maximumFractionDigits: 0})}</td>
-                      <td className="px-4 py-2 text-right font-bold text-blue-700">₹{group.total.toLocaleString('en-IN', {maximumFractionDigits: 0})}</td>
-                      <td className="px-4 py-2 font-medium text-blue-800">{group.customer || '-'}</td>
-                      <td className="px-4 py-2"></td>
-                    </tr>
-                    {/* Line items */}
-                    {group.items.map((s) => (
-                      <tr key={s.id} className="border-b hover:bg-gray-50 bg-gray-50/50">
-                        <td className="px-4 py-2 pl-8 text-gray-400 text-xs">{new Date(s.date).toLocaleDateString()}</td>
-                        <td className="px-4 py-2 text-gray-400 text-xs">{s.invoice_no}</td>
-                        <td className="px-4 py-2 font-medium">{s.product_name}</td>
-                        <td className="px-4 py-2">
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${s.product_type === 'preform' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'}`}>{s.product_type}</span>
-                        </td>
-                        <td className="px-4 py-2">{s.product_variant}</td>
-                        <td className="px-4 py-2 text-right">{s.quantity}</td>
-                        <td className="px-4 py-2 text-right">₹{s.price_per_unit.toLocaleString('en-IN')}</td>
-                        <td className="px-4 py-2 text-right">₹{(s.taxable_amount || 0).toLocaleString('en-IN')}</td>
-                        <td className="px-4 py-2 text-right font-medium text-blue-700">₹{s.total_price.toLocaleString('en-IN')}</td>
-                        <td className="px-4 py-2">{s.customer || '-'}</td>
-                        <td className="px-4 py-2 text-center">
-                          <button onClick={() => remove(s.id)} className="text-gray-400 hover:text-red-600"><Trash2 size={16} /></button>
-                        </td>
-                      </tr>
-                    ))}
-                  </React.Fragment>
-                ) : (
-                  group.items.map((s) => (
-                    <tr key={s.id} className="border-b hover:bg-gray-50">
-                      <td className="px-4 py-3">{new Date(s.date).toLocaleDateString()}</td>
-                      <td className="px-4 py-3 text-xs text-gray-500">{s.invoice_no || '-'}</td>
-                      <td className="px-4 py-3 font-medium">{s.product_name}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${s.product_type === 'preform' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'}`}>{s.product_type}</span>
-                      </td>
-                      <td className="px-4 py-3">{s.product_variant}</td>
-                      <td className="px-4 py-3 text-right">{s.quantity}</td>
-                      <td className="px-4 py-3 text-right">₹{s.price_per_unit.toLocaleString('en-IN')}</td>
-                      <td className="px-4 py-3 text-right">₹{(s.taxable_amount || 0).toLocaleString('en-IN')}</td>
-                      <td className="px-4 py-3 text-right font-medium text-blue-700">₹{s.total_price.toLocaleString('en-IN')}</td>
-                      <td className="px-4 py-3">{s.customer || '-'}</td>
-                      <td className="px-4 py-3 text-center">
-                        <button onClick={() => remove(s.id)} className="text-gray-400 hover:text-red-600"><Trash2 size={16} /></button>
-                      </td>
-                    </tr>
-                  ))
-                );
-              })
-            ) : (
-              sorted.map((s) => (
-                <tr key={s.id} className="border-b hover:bg-gray-50">
+            {sorted.map((s, idx) => {
+              const prevInvoice = idx > 0 ? (sorted[idx - 1].invoice_no || '') : null;
+              const currInvoice = s.invoice_no || '';
+              const isNewGroup = idx > 0 && currInvoice !== prevInvoice;
+              return (
+                <tr key={s.id} className={`hover:bg-gray-50 ${isNewGroup ? 'border-t-[3px] border-gray-300' : 'border-b border-gray-100'}`}>
                   <td className="px-4 py-3">{new Date(s.date).toLocaleDateString()}</td>
                   <td className="px-4 py-3 text-xs text-gray-500">{s.invoice_no || '-'}</td>
                   <td className="px-4 py-3 font-medium">{s.product_name}</td>
@@ -307,8 +230,8 @@ export default function Sales() {
                     <button onClick={() => remove(s.id)} className="text-gray-400 hover:text-red-600"><Trash2 size={16} /></button>
                   </td>
                 </tr>
-              ))
-            )}
+              );
+            })}
             {filtered.length === 0 && (
               <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">No sales recorded yet.</td></tr>
             )}

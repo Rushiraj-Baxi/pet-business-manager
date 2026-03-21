@@ -170,6 +170,13 @@ Wrap actions between <<<ACTIONS>>> and <<<END_ACTIONS>>> markers. JSON must be a
 30. update_production (edit any field on an existing production record)
     {"type": "update_production", "production_id": 2, "quantity_produced": 1500, "raw_material_used": 30.0, "wastage": 0.8, "hours_run": 10}
 
+── BULK UPDATE CUSTOMER NAME ──
+31. bulk_update_customer (rename a customer across ALL sales, not just recent ones)
+    {"type": "bulk_update_customer", "old_name": "SURAKSHPET", "new_name": "M/S Suraksh Pet"}
+    This searches ALL sales in the database where the customer name contains old_name (case-insensitive)
+    and updates them to new_name. Use this when the user asks to rename/fix a customer name across all records.
+    Do NOT use update_sale for bulk customer renames — use this action instead.
+
 ── CHARTS (Dashboard) ──
 You can CREATE, EDIT, or DELETE charts on the dashboard!
 
@@ -286,6 +293,14 @@ Done! Updated sale #5.
 
 <<<ACTIONS>>>
 [{"type":"update_sale","sale_id":5,"quantity":600,"customer":"XYZ Corp"}]
+<<<END_ACTIONS>>>
+
+User: "Rename customer SURAKSHPET to M/S Suraksh Pet in all sales"
+
+Done! I've updated the customer name from "SURAKSHPET" to "M/S Suraksh Pet" across all matching sales records.
+
+<<<ACTIONS>>>
+[{"type":"bulk_update_customer","old_name":"SURAKSHPET","new_name":"M/S Suraksh Pet"}]
 <<<END_ACTIONS>>>"""
 
 

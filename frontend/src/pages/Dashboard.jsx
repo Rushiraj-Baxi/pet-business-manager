@@ -4,7 +4,7 @@ import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area,
 } from 'recharts';
-import { TrendingUp, TrendingDown, Package, AlertTriangle, IndianRupee, Percent, Upload, CheckCircle, XCircle, Trash2, Receipt, FolderOpen, FileText, X, RefreshCw } from 'lucide-react';
+import { TrendingUp, TrendingDown, Package, IndianRupee, Percent, Upload, CheckCircle, XCircle, Trash2, Receipt, FolderOpen, FileText, X, RefreshCw } from 'lucide-react';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
@@ -505,22 +505,7 @@ export default function Dashboard() {
         <StatCard title="Expenses" value={fmt(data.expenses)} icon={TrendingDown} color="red" />
       </div>
 
-      {/* Alerts */}
-      {(data.low_stock_products.length > 0 || data.low_stock_materials.length > 0) && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-          <div className="flex items-center gap-2 text-amber-700 font-semibold mb-2">
-            <AlertTriangle size={18} /> Low Stock Alerts
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-            {data.low_stock_products.map((p) => (
-              <div key={p.id} className="text-amber-800">⚠️ Product: {p.name} — only {p.stock} left</div>
-            ))}
-            {data.low_stock_materials.map((m) => (
-              <div key={m.id} className="text-amber-800">⚠️ Material: {m.name} — {m.stock} {m.unit} left</div>
-            ))}
-          </div>
-        </div>
-      )}
+
 
       {/* Charts Row 1 - Sales Trend & Sales by Product */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
