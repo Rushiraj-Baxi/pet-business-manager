@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { api } from '../api';
-import { Plus, Trash2, X, Check, ChevronUp, ChevronDown, Search, Pencil } from 'lucide-react';
+import { Plus, Trash2, X, Check, ChevronUp, ChevronDown, Search, Pencil, Download } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 export default function Sales() {
   const [sales, setSales] = useState([]);
@@ -138,6 +139,26 @@ export default function Sales() {
   const totalTax = totalRevenue - totalTaxable;
   const totalQty = filtered.reduce((s, x) => s + x.quantity, 0);
 
+  function downloadExcel() {
+    const rows = sorted.map((s) => ({
+      Date: s.date ? new Date(s.date).toLocaleDateString() : '',
+      Invoice: s.invoice_no || '',
+      Product: s.product_name,
+      Type: s.product_type,
+      Variant: s.product_variant,
+      Qty: s.quantity,
+      'Price/Unit': s.price_per_unit,
+      'Taxable Amt': s.taxable_amount || 0,
+      'Total (with Tax)': s.total_price,
+      Customer: s.customer || '',
+    }));
+    rows.push({ Date: '', Invoice: '', Product: '', Type: '', Variant: 'TOTALS', Qty: totalQty, 'Price/Unit': '', 'Taxable Amt': totalTaxable, 'Total (with Tax)': totalRevenue, Customer: '' });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sales');
+    XLSX.writeFile(wb, `Sales_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
@@ -145,9 +166,14 @@ export default function Sales() {
           <h1 className="text-2xl font-bold text-gray-800">Sales</h1>
           <p className="text-gray-500 text-sm">Record & track all sales</p>
         </div>
-        <button onClick={() => setShowForm(true)} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">
-          <Plus size={16} /> Record Sale
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={downloadExcel} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700">
+            <Download size={16} /> Download Excel
+          </button>
+          <button onClick={() => setShowForm(true)} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">
+            <Plus size={16} /> Record Sale
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
