@@ -16,15 +16,20 @@ class SaleCreate(BaseModel):
     price_per_unit: float
     customer: str = ""
     date: Optional[str] = None
+    invoice_no: Optional[str] = None
+    taxable_amount: Optional[float] = None
+    total_price: Optional[float] = None
 
 
 class SaleUpdate(BaseModel):
+    product_id: Optional[int] = None
     quantity: Optional[int] = None
     price_per_unit: Optional[float] = None
     customer: Optional[str] = None
     date: Optional[str] = None
     invoice_no: Optional[str] = None
     taxable_amount: Optional[float] = None
+    total_price: Optional[float] = None
 
 
 @router.get("")
@@ -72,12 +77,15 @@ def create_sale(data: SaleCreate, db: Session = Depends(get_db)):
     if prod.stock < data.quantity:
         raise HTTPException(400, f"Insufficient stock. Available: {prod.stock}")
     d = datetime.fromisoformat(data.date) if data.date else datetime.now(timezone.utc)
+    total = data.total_price if data.total_price is not None else data.quantity * data.price_per_unit
     s = Sale(
         product_id=data.product_id,
         quantity=data.quantity,
         price_per_unit=data.price_per_unit,
-        total_price=data.quantity * data.price_per_unit,
+        total_price=total,
+        taxable_amount=data.taxable_amount,
         customer=data.customer,
+        invoice_no=data.invoice_no or "",
         date=d,
     )
     prod.stock -= data.quantity
@@ -138,15 +146,27 @@ def update_sale(sale_id: int, data: SaleUpdate, db: Session = Depends(get_db)):
     s = db.query(Sale).filter(Sale.id == sale_id).first()
     if not s:
         raise HTTPException(404, "Sale not found")
+    if data.product_id is not None and data.product_id != s.product_id:
+        old_prod = db.query(Product).filter(Product.id == s.product_id).first()
+        new_prod = db.query(Product).filter(Product.id == data.product_id).first()
+        if not new_prod:
+            raise HTTPException(404, "New product not found")
+        if old_prod:
+            old_prod.stock += s.quantity
+        s.product_id = data.product_id
     if data.quantity is not None:
         prod = db.query(Product).filter(Product.id == s.product_id).first()
         if prod:
             prod.stock += s.quantity - data.quantity
         s.quantity = data.quantity
-        s.total_price = data.quantity * s.price_per_unit
+        if data.total_price is None:
+            s.total_price = data.quantity * s.price_per_unit
     if data.price_per_unit is not None:
         s.price_per_unit = data.price_per_unit
-        s.total_price = s.quantity * data.price_per_unit
+        if data.total_price is None:
+            s.total_price = s.quantity * data.price_per_unit
+    if data.total_price is not None:
+        s.total_price = data.total_price
     if data.customer is not None:
         s.customer = data.customer
     if data.date is not None:

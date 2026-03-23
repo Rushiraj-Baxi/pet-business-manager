@@ -9,7 +9,7 @@ export default function Sales() {
   const [showForm, setShowForm] = useState(false);
   const [editSale, setEditSale] = useState(null);
   const [filters, setFilters] = useState({ product_type: '', variant: '', start_date: '', end_date: '' });
-  const [form, setForm] = useState({ product_id: '', quantity: '', price_per_unit: '', customer: '', date: '' });
+  const [form, setForm] = useState({ product_id: '', quantity: '', price_per_unit: '', customer: '', date: '', invoice_no: '', taxable_amount: '', total_price: '' });
   const [editForm, setEditForm] = useState({});
   const [sortCol, setSortCol] = useState('date');
   const [sortDir, setSortDir] = useState('desc');
@@ -38,15 +38,19 @@ export default function Sales() {
   }
 
   async function save() {
-    await api.createSale({
+    const payload = {
       product_id: Number(form.product_id),
       quantity: Number(form.quantity),
       price_per_unit: Number(form.price_per_unit),
       customer: form.customer,
       date: form.date || undefined,
-    });
+    };
+    if (form.invoice_no) payload.invoice_no = form.invoice_no;
+    if (form.taxable_amount) payload.taxable_amount = Number(form.taxable_amount);
+    if (form.total_price) payload.total_price = Number(form.total_price);
+    await api.createSale(payload);
     setShowForm(false);
-    setForm({ product_id: '', quantity: '', price_per_unit: '', customer: '', date: '' });
+    setForm({ product_id: '', quantity: '', price_per_unit: '', customer: '', date: '', invoice_no: '', taxable_amount: '', total_price: '' });
     load();
     loadProducts();
   }
@@ -61,22 +65,26 @@ export default function Sales() {
   function startEdit(s) {
     setEditSale(s);
     setEditForm({
+      product_id: s.product_id,
       quantity: s.quantity,
       price_per_unit: s.price_per_unit,
       customer: s.customer || '',
       date: s.date ? s.date.split('T')[0] : '',
       invoice_no: s.invoice_no || '',
       taxable_amount: s.taxable_amount || 0,
+      total_price: s.total_price || 0,
     });
   }
 
   async function saveEdit() {
     const updates = {};
+    if (Number(editForm.product_id) !== editSale.product_id) updates.product_id = Number(editForm.product_id);
     if (Number(editForm.quantity) !== editSale.quantity) updates.quantity = Number(editForm.quantity);
     if (Number(editForm.price_per_unit) !== editSale.price_per_unit) updates.price_per_unit = Number(editForm.price_per_unit);
     if (editForm.customer !== (editSale.customer || '')) updates.customer = editForm.customer;
     if (editForm.invoice_no !== (editSale.invoice_no || '')) updates.invoice_no = editForm.invoice_no;
     if (Number(editForm.taxable_amount) !== (editSale.taxable_amount || 0)) updates.taxable_amount = Number(editForm.taxable_amount);
+    if (Number(editForm.total_price) !== (editSale.total_price || 0)) updates.total_price = Number(editForm.total_price);
     const editDate = editForm.date || '';
     const saleDate = editSale.date ? editSale.date.split('T')[0] : '';
     if (editDate !== saleDate) updates.date = editForm.date;
@@ -230,8 +238,15 @@ export default function Sales() {
                 <input type="number" className="border rounded-lg px-3 py-2 text-sm" placeholder="Quantity" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} />
                 <input type="number" className="border rounded-lg px-3 py-2 text-sm" placeholder="Price/Unit (₹)" value={form.price_per_unit} onChange={(e) => setForm({ ...form, price_per_unit: e.target.value })} />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <input type="number" className="border rounded-lg px-3 py-2 text-sm" placeholder="Taxable Amount (₹)" value={form.taxable_amount} onChange={(e) => setForm({ ...form, taxable_amount: e.target.value })} />
+                <input type="number" className="border rounded-lg px-3 py-2 text-sm" placeholder="Total with Tax (₹)" value={form.total_price} onChange={(e) => setForm({ ...form, total_price: e.target.value })} />
+              </div>
               <input className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Customer Name" value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} />
-              <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+              <div className="grid grid-cols-2 gap-3">
+                <input className="border rounded-lg px-3 py-2 text-sm" placeholder="Invoice No" value={form.invoice_no} onChange={(e) => setForm({ ...form, invoice_no: e.target.value })} />
+                <input type="date" className="border rounded-lg px-3 py-2 text-sm" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+              </div>
               <button onClick={save} className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm hover:bg-blue-700 flex items-center justify-center gap-2">
                 <Check size={16} /> Record Sale
               </button>
@@ -248,7 +263,12 @@ export default function Sales() {
               <h2 className="text-lg font-bold">Edit Sale</h2>
               <button onClick={() => setEditSale(null)}><X size={20} /></button>
             </div>
-            <div className="text-sm text-gray-500 mb-3">Product: <span className="font-medium text-gray-800">{editSale.product_name}</span></div>
+            <div className="text-sm text-gray-500 mb-3">
+              <label className="text-xs text-gray-500 mb-1 block">Product</label>
+              <select className="w-full border rounded-lg px-3 py-2 text-sm" value={editForm.product_id} onChange={(e) => setEditForm({ ...editForm, product_id: e.target.value })}>
+                {products.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.type} - {p.variant})</option>)}
+              </select>
+            </div>
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -260,9 +280,15 @@ export default function Sales() {
                   <input type="number" className="w-full border rounded-lg px-3 py-2 text-sm" value={editForm.price_per_unit} onChange={(e) => setEditForm({ ...editForm, price_per_unit: e.target.value })} />
                 </div>
               </div>
-              <div>
-                <label className="text-xs text-gray-500 mb-1 block">Taxable Amount (₹)</label>
-                <input type="number" className="w-full border rounded-lg px-3 py-2 text-sm" value={editForm.taxable_amount} onChange={(e) => setEditForm({ ...editForm, taxable_amount: e.target.value })} />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Taxable Amount (₹)</label>
+                  <input type="number" className="w-full border rounded-lg px-3 py-2 text-sm" value={editForm.taxable_amount} onChange={(e) => setEditForm({ ...editForm, taxable_amount: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">Total with Tax (₹)</label>
+                  <input type="number" className="w-full border rounded-lg px-3 py-2 text-sm" value={editForm.total_price} onChange={(e) => setEditForm({ ...editForm, total_price: e.target.value })} />
+                </div>
               </div>
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">Customer</label>
